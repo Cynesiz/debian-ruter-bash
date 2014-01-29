@@ -1,0 +1,68 @@
+/usr/local/bin/fw_nat
+
+#!/bin/sh
+##/usr/local/bin/fw_nat
+#iptables firewall script for sharing
+#broadband Internet, with no public services
+
+#define variables
+ipt="/sbin/iptables"
+mod="/sbin/modprobe"
+LAN_IFACE="eth0"
+WAN_IFACE="eth1"
+
+#basic set of kernel modules
+$mod ip_tables
+$mod ip_conntrack
+$mod iptable_filter
+$mod iptable_nat
+$mod iptable_mangle
+$mod ipt_LOG
+$mod ipt_limit
+$mod ipt_state
+$mod ipt_MASQUERADE
+
+#add these for IRC and FTP
+$mod ip_nat_ftp
+$mod ip_nat_irc
+$mod ip_conntrack_ftp
+$mod ip_conntrack_irc
+
+# Flush all active rules and delete all custom chains
+$ipt -F
+$ipt -t nat -F
+$ipt -t mangle -F
+$ipt -X
+$ipt -t nat -X
+$ipt -t mangle -X
+
+#Set default policies
+$ipt -P INPUT DROP
+$ipt -P FORWARD DROP
+$ipt -P OUTPUT ACCEPT
+$ipt -t nat -P OUTPUT ACCEPT
+$ipt -t nat -P PREROUTING ACCEPT
+$ipt -t nat -P POSTROUTING ACCEPT
+$ipt -t mangle -P PREROUTING ACCEPT
+$ipt -t mangle -P POSTROUTING ACCEPT
+
+#this line is necessary for the loopback interface
+#and internal socket-based services to work correctly
+$ipt -A INPUT -i lo -j ACCEPT
+
+#Enable IP masquerading
+$ipt -t nat -A POSTROUTING -o $WAN_IFACE -j MASQUERADE
+
+#Enable unrestricted outgoing traffic, incoming
+#is restricted to locally-initiated sessions only
+$ipt -A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+$ipt -A FORWARD -i $WAN_IFACE -o $LAN_IFACE -m state --state ESTABLISHED,RELATED -j ACCEPT
+$ipt -A FORWARD -i $LAN_IFACE -o $WAN_IFACE -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
+
+# Accept important ICMP messages
+$ipt -A INPUT -p icmp --icmp-type echo-request  -j ACCEPT
+$ipt -A INPUT -p icmp --icmp-type time-exceeded -j ACCEPT
+$ipt -A INPUT -p icmp --icmp-type destination-unreachable -j ACCEPT
+
+#Reject connection attempts not initiated from inside the LAN
+$ipt -A INPUT -p tcp --syn -j DROP
